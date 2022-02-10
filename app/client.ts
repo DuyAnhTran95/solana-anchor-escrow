@@ -71,7 +71,6 @@ async function main() {
   await escrowProgram.rpc.initEscrow(new anchor.BN(10), {
     accounts: {
       user: initializer.publicKey,
-      tokenDepositAcc: initializerTokenAccA,
       tokenRxAcc: initializerTokenAccB,
       escrowInfo: escrowAcc.publicKey,
       tokenProgram: TOKEN_PROGRAM_ID,

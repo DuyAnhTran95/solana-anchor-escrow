@@ -43,20 +43,18 @@ pub struct InitializeEscrow<'info> {
     pub escrow_info: Account<'info, Escrow>,
     #[account(mut @ EscrowError::InvalidAccount)]
     pub user: Signer<'info>,
-    #[account(mut @ EscrowError::InvalidAccount)]
-    pub token_deposit_acc: Account<'info, TokenAccount>,
     pub token_rx_acc: Account<'info, TokenAccount>,
     pub token_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
-    #[account(mut @ EscrowError::InvalidAccount)]
+    #[account(mut @ EscrowError::InvalidAccount, rent_exempt = enforce)]
     pub vault_acc: Account<'info, TokenAccount>,
 }
 
 #[derive(Accounts)]
 pub struct Exchange<'info> {
-    // #[account(mut, has_one = authority)]
-    // pub counter: Account<'info, Counter>,
+    pub escrow_info: Account<'info, Escrow>,
+    pub initializer_token_rx_acc: Account<'info, TokenAccount>,
     pub authority: Signer<'info>,
 }
 
@@ -73,8 +71,4 @@ pub struct Escrow {
 pub enum EscrowError {
     #[msg("Invalid account")]
     InvalidAccount,
-    #[msg("Invalid account 2")]
-    InvalidAccount2,
-    #[msg("Invalid account 3")]
-    InvalidAccount3,
 }
