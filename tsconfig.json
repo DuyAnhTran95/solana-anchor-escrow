@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "rootDir": "./app",
+    "outDir": "./build",
+    "typeRoots": ["./node_modules/@types"],
+    "module": "commonjs",
+    "target": "es2017",
+    "esModuleInterop": true
+  }
+}
