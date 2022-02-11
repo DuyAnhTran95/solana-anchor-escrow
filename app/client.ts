@@ -1,5 +1,5 @@
 import * as anchor from "@project-serum/anchor";
-import { PublicKey, SOLANA_SCHEMA, SystemProgram } from "@solana/web3.js";
+import { PublicKey, Connection, SystemProgram } from "@solana/web3.js";
 import * as fs from "fs";
 import { Token, TOKEN_PROGRAM_ID, AccountLayout } from "@solana/spl-token";
 require("dotenv").config();
@@ -16,12 +16,15 @@ const programId = new anchor.web3.PublicKey(idl.metadata?.address);
 
 const escrowAcc = anchor.web3.Keypair.generate();
 const initializer = anchor.web3.Keypair.generate();
+const taker = anchor.web3.Keypair.generate();
 const mintAuthority = anchor.web3.Keypair.generate();
 const vaultAcc = new anchor.web3.Keypair();
 const payer = anchor.web3.Keypair.fromSecretKey(Uint8Array.from(secretKey));
 
 let initializerTokenAccA: PublicKey;
 let initializerTokenAccB: PublicKey;
+let takerTokenAccA: PublicKey;
+let takerTokenAccB: PublicKey;
 let mintA: Token, mintB: Token;
 
 const provider = anchor.Provider.local();
@@ -45,6 +48,8 @@ async function setup() {
     TOKEN_PROGRAM_ID
   );
 
+  console.log(`tokenA: ${mintA.publicKey.toBase58()}`)
+
   mintB = await Token.createMint(
     provider.connection,
     payer,
@@ -56,13 +61,22 @@ async function setup() {
 
   initializerTokenAccA = await mintA.createAccount(initializer.publicKey);
   initializerTokenAccB = await mintB.createAccount(initializer.publicKey);
+  takerTokenAccA = await mintA.createAccount(taker.publicKey);
+  takerTokenAccB = await mintB.createAccount(taker.publicKey);
 
   await mintA.mintTo(
     initializerTokenAccA,
     mintAuthority.publicKey,
     [mintAuthority],
-    1000
+    1000,
   );
+
+  await mintB.mintTo(
+    takerTokenAccB,
+    mintAuthority.publicKey,
+    [mintAuthority],
+    1000,
+  )
 }
 
 async function main() {
@@ -77,6 +91,7 @@ async function main() {
       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       systemProgram: anchor.web3.SystemProgram.programId,
       vaultAcc: vaultAcc.publicKey,
+      // mint: mintB.publicKey,
     },
     instructions: [
       SystemProgram.createAccount({
@@ -94,17 +109,52 @@ async function main() {
         vaultAcc.publicKey,
         initializer.publicKey
       ),
-      // await escrowProgram.account.escrow.createInstruction(escrowAcc),
+      Token.createTransferInstruction(
+        TOKEN_PROGRAM_ID,
+        initializerTokenAccA,
+        vaultAcc.publicKey,
+        initializer.publicKey,
+        [initializer],
+        20,
+      ),
     ],
     signers: [escrowAcc, initializer, vaultAcc],
   });
 
-  let _escrowAcc = await escrowProgram.account.escrow.fetch(
-    escrowAcc.publicKey
-  );
+  let vaultAccBal = await getTokenBalance(vaultAcc.publicKey, provider.connection);
+  console.log(`vault acc bal: ${vaultAccBal}`);
 
-  console.log(_escrowAcc);
+  const [vaultPDA] = await PublicKey.findProgramAddress(
+    [Buffer.from(anchor.utils.bytes.utf8.encode("escrow"))],
+    escrowProgram.programId,
+  )
+
+  escrowProgram.rpc.exchange({
+    accounts: {
+      taker: taker.publicKey,
+      initializer: initializer.publicKey,
+      escrowInfo: escrowAcc.publicKey,
+      initializerTokenRxAcc: initializerTokenAccB,
+      takerTokenRxAcc: takerTokenAccA,
+      takerTokenDepositAcc: takerTokenAccB,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      vaultAcc: vaultAcc.publicKey,
+      vaultPda: vaultPDA,
+    },
+    signers: [taker],
+  });
+
+  console.log(await getTokenBalance(initializerTokenAccB, provider.connection))
 }
+
+async function getTokenBalance(
+  pubkey: PublicKey,
+  connection: Connection
+) {
+  return parseInt(
+    (await connection.getTokenAccountBalance(pubkey)).value.amount
+  );
+};
 
 main().then((rs) => {
   console.log("done");
