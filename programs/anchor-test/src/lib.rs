@@ -72,18 +72,12 @@ pub mod anchor_test {
                 .initializer_token_rx_acc
                 .to_account_info()
                 .clone(),
-            authority: ctx.accounts.initializer.to_account_info().clone(),
+            authority: ctx.accounts.taker.to_account_info().clone(),
         };
         let initializer_transfer_ctx =
             CpiContext::new(ctx.accounts.token_program.clone(), to_initializer_transfer);
         msg!("Send token to initializer");
         token::transfer(initializer_transfer_ctx, escrow_info.expected_amount)?;
-
-        let amnt = format!("expect amount {}", escrow_info.expected_amount);
-        msg!(&amnt[..]);
-        let bal = format!("taker bal {}", ctx.accounts.taker_token_deposit_acc.amount);
-        msg!(&bal[..]);
-
 
         // transfer token to taker
         let to_taker_transfer = Transfer {
@@ -109,7 +103,48 @@ pub mod anchor_test {
         msg!("Close vault token account");
         token::close_account(close_vault_ctx.with_signer(&[&vault_auth[..]]))?;
 
-        // Err(EscrowError::InvalidAccountError.into())
+        Ok(())
+    }
+
+    pub fn cancel(ctx: Context<Cancel>) -> ProgramResult {
+        let escrow_info = &mut ctx.accounts.escrow_info;
+
+        if escrow_info.initializer != *ctx.accounts.initializer.to_account_info().key {
+            return Err(EscrowError::InvalidAccountError.into());
+        }
+
+        let (vault_pda, vault_bump) =
+            Pubkey::find_program_address(&[ESCROW_PDA_SEED], ctx.program_id);
+
+        if vault_pda != *ctx.accounts.vault_pda.key {
+            return Err(EscrowError::InvalidAccountError.into());
+        }
+        let vault_auth = &[&ESCROW_PDA_SEED[..], &[vault_bump]];
+
+        // return token back to initializer
+        let to_taker_transfer = Transfer {
+            from: ctx.accounts.vault_acc.to_account_info().clone(),
+            to: ctx.accounts.token_deposit_acc.to_account_info().clone(),
+            authority: ctx.accounts.vault_pda.clone(),
+        };
+        let taker_transfer_ctx =
+            CpiContext::new(ctx.accounts.token_program.clone(), to_taker_transfer);
+        msg!("Return token to initializer");
+        token::transfer(
+            taker_transfer_ctx.with_signer(&[&vault_auth[..]]),
+            ctx.accounts.vault_acc.amount,
+        )?;
+
+        // close vault account
+        let close_vault = CloseAccount {
+            account: ctx.accounts.vault_acc.to_account_info().clone(),
+            destination: ctx.accounts.initializer.to_account_info().clone(),
+            authority: ctx.accounts.vault_pda.clone(),
+        };
+        let close_vault_ctx = CpiContext::new(ctx.accounts.token_program.clone(), close_vault);
+        msg!("Close vault token account");
+        token::close_account(close_vault_ctx.with_signer(&[&vault_auth[..]]))?;
+
         Ok(())
     }
 }
@@ -144,6 +179,20 @@ pub struct Exchange<'info> {
     #[account(mut)]
     pub vault_acc: Account<'info, TokenAccount>,
     pub vault_pda: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct Cancel<'info> {
+    #[account(mut)]
+    pub initializer: Signer<'info>,
+    #[account(mut, close = initializer)]
+    pub escrow_info: Account<'info, Escrow>,
+    #[account(mut)]
+    pub token_deposit_acc: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub vault_acc: Account<'info, TokenAccount>,
+    pub vault_pda: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
 }
 
 #[account]
